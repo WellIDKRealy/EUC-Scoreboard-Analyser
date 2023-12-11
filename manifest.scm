@@ -106,7 +106,8 @@
 	  python-pyyaml
 	  python-shapely
 	  python-pyclipper
-	  python-ninja))
+	  python-ninja
+	  tesseract-ocr))
    (home-page "https://github.com/madmaze/pytesseract")
    (synopsis "Python-tesseract is a python wrapper for Google's Tesseract-OCR")
    (description
