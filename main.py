@@ -1,36 +1,91 @@
 import cv2
 import numpy as np
 import pytesseract
+import json
+
+import math
+import re
+
+import argparse
+import tempfile
 import sys
 import os
-if len(sys.argv) < 2:
-    print(f'usage: {sys.argv[0]} screenshoot')
-    exit(1)
 
-if not os.path.isdir('Output'):
-    os.mkdir('Output')
+# CLI
 
-img = cv2.imread('SCREEN3.png')
-copy = np.copy(img)
+parser = argparse.ArgumentParser(
+    prog='scoreboard-analyser',
+    description='analyse EUC scoreboard screenshots',
+    epilog='Report any bugs to <https://github.com/WellIDKRealy/EUC-Scoreboard-Analyser>')
 
-# Filter out background
+parser.add_argument('scoreboard', help='scoreboard screenshots path')
+parser.add_argument('-d', '--debug',
+                    action='store_true',
+                    help='enables debug mode')
+parser.add_argument('-s', '--silent',
+                    action='store_true',
+                    help='suepresses unnecessary output')
 
-def filter_backround(img):
-    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
-    lower = np.array([0, 0, 100])
-    upper = np.array([255, 255, 255])
-    mask = cv2.inRange(img, lower, upper)
+args = parser.parse_args()
 
-    return cv2.bitwise_and(img, img, mask=mask)
+DEBUG = args.debug
+SILENT = args.silent
 
-img = filter_backround(img)
+# END CLI
 
-cv2.imwrite('Output/copy.png', img)
+# Setup environment
 
-# Crop only the important part
+CWD = dir_path = os.path.dirname(os.path.realpath(__file__))
+os.chdir(CWD)
 
-start = cv2.imread('Templates/start.png')
-end  = cv2.imread('Templates/end.png')
+OUTPUT_PARENT ='/tmp/scoreboard-analyser-output'
+if not os.path.isdir(OUTPUT_PARENT):
+    os.mkdir(OUTPUT_PARENT)
+
+OUTPUT = tempfile.TemporaryDirectory(dir=OUTPUT_PARENT).name
+os.mkdir(OUTPUT)
+
+def print_log(log):
+    if not SILENT:
+        print(log, file=sys.stderr)
+
+def print_debug(debug):
+    if DEBUG:
+        print(debug, file=sys.stderr)
+
+# END Setup environment
+
+if not os.path.exists(args.scoreboard):
+    print(f'No such file: {args.scoreboard}', file=sys.stderr)
+    exit(2)
+
+print_log('READING IMAGE')
+img = cv2.imread(args.scoreboard)
+
+def crop_out(img):
+    height, width = img.shape[:-1]
+
+    return img[math.floor(0.11*height):math.floor(0.81*height),
+               math.floor(0.13*width):math.floor(0.85*width)]
+
+def filter_background(img):
+    v = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)[:,:,2]
+    _, thresh = cv2.threshold(v,100,255,cv2.THRESH_BINARY)
+
+    return thresh
+
+print_log('FILTERING')
+filtered = filter_background(crop_out(img))
+
+if DEBUG:
+    cv2.imwrite(f'{OUTPUT}/filtered.png', filtered)
+
+# DATA EXTRACTION
+
+def teams(img):
+    width = img.shape[1]//2
+    return (img[:, :width],
+            img[:, width:])
 
 def find_template(img, template):
     result = cv2.matchTemplate(template, img, cv2.TM_SQDIFF_NORMED)
@@ -38,113 +93,234 @@ def find_template(img, template):
 
     return mnLoc
 
-start_rows,start_cols = start.shape[:2]
-start_x, start_y = find_template(img, start)
+def extract_image(img, start_x, start_y, end_x, end_y):
+    width, height = img.shape
+    return img[math.floor(start_y*height):math.floor(end_y*height),
+               math.floor(start_x*width):math.floor(end_y*width)]
 
-# DEBUG
+def ocr(img):
+    os.chdir(OUTPUT)
+    string = pytesseract.image_to_string(img, lang='eng', config='--psm 7').strip()
+    os.chdir(CWD)
 
-cv2.rectangle(copy,
-              (start_x,start_y),
-              (start_x+start_cols,start_y+start_rows),
-              (0,0,255),
-              2)
+    return string
 
-# END DEBUG
+def extract_int(string):
+    string = string.replace('O', '0')
+    groups = re.match('[^\d]*(\d+)[^\d]*', string).groups()
+    return int(groups[0])
 
-end_rows,end_cols = end.shape[:2]
-end_x, end_y = find_template(img, end)
+def get_int_template(img, template, factor_left=0, factor_right=1, debug_img=None):
+    x, y = find_template(img, template)
+    rows, cols = template.shape
 
-# DEBUG
+    if DEBUG:
+        cv2.rectangle(debug_img, (x, y), (x + cols, y + rows), 255, 1)
+        cv2.rectangle(debug_img, (x - math.floor(cols*factor_left), y), (x + math.floor(cols*factor_right), y + rows), 255, 1)
 
-cv2.rectangle(copy,
-              (end_x,end_y),
-              (end_x+end_cols,end_y+end_rows),
-              (0,255,0),
-              2)
+    img = img[y:(y + rows),
+              (x - math.floor(cols*factor_left)):(x + math.floor(cols*factor_right))]
 
-# END DEBUG
+    return extract_int(ocr(img))
 
-# DEBUG
+# TEMPLATES
 
-cv2.rectangle(copy,
-              (start_x, start_y),
-              (end_x+end_cols, end_y),
-              (255, 0, 0),
-              2)
+print_log('READING TEMPLATES')
+player_template = filter_background(cv2.imread('Templates/PlayerName.png'))
+kills_template = filter_background(cv2.imread('Templates/Kills.png'))
+deaths_template = filter_background(cv2.imread('Templates/Deaths.png'))
+ping_template = filter_background(cv2.imread('Templates/Ping.png'))
 
-# END DEBUG
+player_count_template = filter_background(cv2.imread('Templates/PlayerCount.png'))
+alive_count_template = filter_background(cv2.imread('Templates/AliveCount.png'))
+score_template = filter_background(cv2.imread('Templates/Score.png'))
 
-# Split into team half's
+# END TEMPLATES
 
-team_one = img[start_y:end_y, start_x:end_x+end_cols//2]
-team_two = img[start_y:end_y, start_x+end_cols//2:end_x+end_cols]
+def get_faction_name_and_player_count(img, debug_img=None):
+    factor_left = 3.5/7
+    factor_right = 1
+    factor_right_name = 4
 
-templates = [('PlayerName',
-              cv2.imread('Templates/PlayerName.png'),
-              '--psm 7'),
-             ('Kills',
-              cv2.imread('Templates/Kills.png'),
-              '--psm 7 --user-patterns num.patterns'),
-             ('Deaths',
-              cv2.imread('Templates/Deaths.png'),
-              '--psm 7 --user-patterns num.patterns'),
-             ('Ping',
-              cv2.imread('Templates/Ping.png'),
-              '--psm 7 --user-patterns num.patterns')]
+    x, y = find_template(img, player_count_template)
+    rows, cols = player_count_template.shape
 
-def half_get_data(half):
-    # grayscale
-    grayscale = cv2.cvtColor(half, cv2.COLOR_BGR2GRAY)
-    _, grayscale = cv2.threshold(grayscale, 30, 255, cv2.THRESH_BINARY)
+    if DEBUG:
+        cv2.rectangle(debug_img, (x, y), (x + cols, y + rows), 255, 1)
+        cv2.rectangle(debug_img, (x - math.floor(cols*factor_left), y), (x + math.floor(cols*factor_right), y + rows), 255, 1)
+        cv2.rectangle(debug_img, (x - math.floor(cols*factor_left), y - rows*2), (x + math.floor(cols*factor_right_name), y), 255, 1)
 
-    borders = []
+    img_player_count = img[y:(y + rows),
+                           (x - math.floor(cols*factor_left)):(x + math.floor(cols*factor_right))]
 
-    last = False
-    last_index = 0
-    for index in range(grayscale.shape[0]):
-        avg = sum(grayscale[index]) > 20*255
+    img_name = img[y - rows*2:y,
+                   x - math.floor(cols*factor_left):x + math.floor(cols*factor_right_name)]
 
-        if avg != last and index - last_index > 5:
-            borders.append(index)
-            last = avg
-            last_index = index
+    return extract_int(ocr(img_player_count)), ocr(img_name)
 
-    height, width = grayscale.shape
+# def get_player_count(img, debug_img=None):
+#     return get_int_template(img, player_count_template, 3.5/7, debug_img=debug_img)
 
-    ranges = []
-    for start_y, end_y in zip(borders[0::2], borders[1::2]):
-        ranges.append((start_y - 5, end_y + 5))
-    ranges = ranges[2:]
+def get_alive_count(img, debug_img=None):
+    return get_int_template(img, alive_count_template, 3.5/5, debug_img=debug_img)
 
-    template_borders = []
-    for _, template, _ in templates:
-        rows, cols = template.shape[:2]
-        x, y = find_template(half, template)
+def get_score(img, debug_img=None):
+    return get_int_template(img, score_template, 0, 8/6, debug_img=debug_img)
 
-        cv2.rectangle(half, (x, y), (x + cols, y + rows), (255, 0, 0), 2)
-        template_borders.append(x)
-    template_borders.append(x + cols)
+def get_bounding_lines(img, debug_img=None):
+    results = []
+    height, width = img.shape
 
-    # Fix ping
-    template_borders[-2] = template_borders[-2] - 15
+    lines = cv2.HoughLinesP(img, 3, np.pi / 180, 50, None, math.floor(width*0.5), 0)
+    for line in lines:
+        start_x, start_y, end_x, end_y = line[0]
+        if(abs(start_y - end_y) < 2):
+            results.append(line[0])
+            if DEBUG:
+                cv2.line(debug_img,
+                         (start_x, start_y),
+                         (end_x, end_y),
+                         255,
+                         3)
 
-    template_ranges = []
-    for start_x, end_x in zip(template_borders, template_borders[1:]):
-        template_ranges.append((start_x, end_x))
+    assert(len(lines) == 2)
 
-    cv2.imwrite('Output/team_two_gray.png', grayscale)
-    for start_y, end_y in ranges:
-        for ((start_x, end_x), (name, _, config)) in zip(template_ranges, templates):
-            img = grayscale[start_y:end_y, start_x:end_x];
-            print(name, pytesseract.image_to_string(img, lang='eng', config=config).strip(), sep=':')
-            #cv2.imwrite('Output/' + name + '2.png', img)
-            cv2.rectangle(half, (start_x, start_y), (end_x, end_y), (255, 0, 0), 2)
+    if results[0][1] < results[1][1]:
+        return (results[0], results[1])
+    return (results[1], results[0])
 
-print('Team One:')
-half_get_data(team_one)
-#print('Team Two:')
-#half_get_data(team_two)
 
-cv2.imwrite('Output/team_one.png', team_one)
-cv2.imwrite('Output/team_two.png', team_two)
-cv2.imwrite('Output/copy.png', copy)
+def get_player_data(img, team_player_count, player_count, debug_img=None):
+    player_x, player_y = find_template(img, player_template)
+    player_rows, player_cols = player_template.shape
+
+    kills_x, kills_y = find_template(img, kills_template)
+    kills_rows, kills_cols = kills_template.shape
+
+    deaths_x, deaths_y = find_template(img, deaths_template)
+    deaths_rows, deaths_cols = deaths_template.shape
+
+    ping_x, ping_y = find_template(img, ping_template)
+    ping_rows, ping_cols = ping_template.shape
+
+    # Extrapolate location of Alive
+    alive_rows = kills_rows
+    alive_cols = kills_cols//5*10
+
+    alive_x = (player_x + player_cols - alive_cols//2 + kills_x)//2
+    alive_y = (player_y + kills_y)//2
+
+    if DEBUG:
+        cv2.rectangle(debug_img,
+                      (player_x, player_y),
+                      (player_x+player_cols, player_y+player_rows),
+                      255,
+                      2)
+
+        cv2.rectangle(debug_img,
+                      (kills_x, kills_y),
+                      (kills_x+kills_cols, kills_y+kills_rows),
+                      255,
+                      2)
+
+        cv2.rectangle(debug_img,
+                      (deaths_x, deaths_y),
+                      (deaths_x+deaths_cols, deaths_y+deaths_rows),
+                      255,
+                      2)
+
+        cv2.rectangle(debug_img,
+                      (ping_x, ping_y),
+                      (ping_x+ping_cols, ping_y+ping_rows),
+                      255,
+                      2)
+
+        cv2.rectangle(debug_img,
+                      (alive_x, alive_y),
+                      (alive_x+alive_cols, alive_y+alive_rows),
+                      255,
+                      2)
+
+    bound_up, bound_down = get_bounding_lines(img, debug_img=debug_img)
+
+    start_x, start_y, end_x = bound_up[:3]
+    end_y = bound_down[1]
+
+    # print(start_x, start_y, player_count)
+
+    size_y = (end_y - start_y)//player_count
+
+    results = []
+    for i in range(team_player_count):
+        y = start_y + size_y*i
+
+        out = {}
+
+        print_log(f'PROCESSING {i + 1}/{team_player_count}')
+
+        out['name'] = ocr(img[y:y + size_y, player_x:player_x + player_cols])
+        out['alive'] = ocr(img[y:y + size_y, alive_x:alive_x + alive_cols])
+        out['kills'] = ocr(img[y:y + size_y, kills_x:kills_x + kills_cols])
+        out['deaths'] = ocr(img[y:y + size_y, deaths_x:deaths_x + deaths_cols])
+        out['ping'] = ocr(img[y:y + size_y, ping_x - ping_cols//4:ping_x + ping_cols])
+
+        if DEBUG:
+            cv2.rectangle(debug_img, (player_x, y), (player_x + player_cols, y + size_y), 255, 2)
+            cv2.rectangle(debug_img, (alive_x, y), (alive_x + alive_cols, y + size_y), 255, 2)
+            cv2.rectangle(debug_img, (kills_x, y), (kills_x + kills_cols, y + size_y), 255, 2)
+            cv2.rectangle(debug_img, (deaths_x, y), (deaths_x + deaths_cols, y + size_y), 255, 2)
+            cv2.rectangle(debug_img, (ping_x - ping_cols//4, y), (ping_x + ping_cols, y + size_y), 255, 2)
+
+        results.append(out)
+    return results
+
+team_one, team_two = teams(filtered)
+team_one_debug = np.copy(team_one) if DEBUG else None
+team_two_debug = np.copy(team_two) if DEBUG else None
+
+try:
+    print_log('SCRAPING PLAYER COUNTS')
+    team_one_player_count, team_one_name = get_faction_name_and_player_count(team_one, debug_img=team_one_debug)
+    team_two_player_count, team_two_name = get_faction_name_and_player_count(team_two, debug_img=team_two_debug)
+
+    # team_one_player_count = get_player_count(team_one, debug_img=team_one_debug)
+    # team_two_player_count = get_player_count(team_two, debug_img=team_two_debug)
+
+    print_log('SCRAPING ALIVE COUNTS')
+    team_one_alive_count = get_alive_count(team_one, debug_img=team_one_debug)
+    team_two_alive_count = get_alive_count(team_two, debug_img=team_two_debug)
+
+    print_log('SCRAPING SCORES COUNTS')
+    team_one_score = get_score(team_one, debug_img=team_one_debug)
+    team_two_score = get_score(team_two, debug_img=team_two_debug)
+
+    player_count = max(team_one_player_count, team_two_player_count)
+
+    print_log(f'PLAYER_COUNT: {team_one_player_count + team_two_player_count}')
+
+    print_log('SCRAPING TEAM 1 PLAYER DATA')
+    team_one_player_data = get_player_data(team_one, team_one_player_count, player_count, debug_img=team_one_debug)
+
+    print_log('SCRAPING TEAM 2 PLAYER DATA')
+    team_two_player_data = get_player_data(team_two, team_two_player_count, player_count, debug_img=team_two_debug)
+finally:
+    if DEBUG:
+        cv2.imwrite(f'{OUTPUT}/team_one.png', team_one_debug)
+        cv2.imwrite(f'{OUTPUT}/team_two.png', team_two_debug)
+        print_debug(f'DEBUG OUTPUT: {OUTPUT}')
+
+print(json.dumps({
+    'team1' : {
+        'score': team_one_score,
+        'name': team_one_name,
+        'alive': team_one_alive_count,
+        'players_no': team_one_player_count,
+        'players': team_one_player_data
+    },
+    'team2' : {
+        'score': team_two_score,
+        'name': team_two_name,
+        'alive': team_two_alive_count,
+        'players_no': team_two_player_count,
+        'players': team_two_player_data
+    }}))
