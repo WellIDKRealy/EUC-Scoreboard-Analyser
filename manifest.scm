@@ -3,6 +3,7 @@
 	     (guix git-download)
 	     (guix build-system python)
 	     (guix build-system pyproject)
+	     (guix build utils)
 	     (gnu packages python-xyz)
 	     (gnu packages ocr)
 	     (gnu packages machine-learning)
@@ -81,6 +82,24 @@
     "Python-tesseract is a python wrapper for Google's Tesseract-OCR")
    (license #f)))
 
+(define python-bidi
+  (package
+    (name "python-bidi")
+    (version "0.4.2")
+    (source
+     (origin
+       (method url-fetch)
+       (uri (pypi-uri "python-bidi" version))
+       (sha256
+	(base32 "0vj93h930v65najq3jkpcy6vlfgy5gnrvw2pqrnrgsdkh8ggfisk"))))
+    (build-system pyproject-build-system)
+    (propagated-inputs (list python-six))
+    (home-page "https://github.com/MeirKriheli/python-bidi")
+    (synopsis "Pure python implementation of the BiDi layout algorithm")
+    (description
+     "Pure python implementation of the @code{BiDi} layout algorithm")
+    (license #f)))
+
 (define python-easyocr
   (package
    (name "python-easyocr")
@@ -94,9 +113,12 @@
      (sha256
       (base32 "0hpm1jwjvlhy1njrdv5q6s8pk9dd9ipcnxpph0pq5fbpnbc8ja0j"))))
    (build-system pyproject-build-system)
+   (arguments
+    '(#:phases (modify-phases %standard-phases
+			      (delete 'check)
+			      (delete 'sanity-check))))
    (propagated-inputs
     (list python-packaging
-	  python-pillow
 	  python-pytorch
 	  python-torchvision
 	  opencv
@@ -106,20 +128,22 @@
 	  python-pyyaml
 	  python-shapely
 	  python-pyclipper
-	  python-ninja
-	  tesseract-ocr))
+	  ninja
+	  python-bidi))
    (home-page "https://github.com/madmaze/pytesseract")
-   (synopsis "Python-tesseract is a python wrapper for Google's Tesseract-OCR")
+   (synopsis "Python-easyocr is python library and commandline OCR tool")
    (description
-    "Python-tesseract is a python wrapper for Google's Tesseract-OCR")
+    "Ready-to-use OCR with 80+ supported languages and all popular writing scripts including: Latin, Chinese, Arabic, Devanagari, Cyrillic, etc.")
    (license #f)))
 
 (packages->manifest
  (cons* python-pytesseract
-	;; python-easyocr
+	python-easyocr
 	(specifications->packages
 	 '("python"
 	   "opencv"
 	   "python-numpy"
+	   ;; QOL
 	   "coreutils"
-	   "inetutils"))))
+	   "inetutils"
+	   "findutils"))))
