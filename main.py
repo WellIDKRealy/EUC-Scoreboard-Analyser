@@ -1,71 +1,34 @@
 import cv2
 import numpy as np
-# import pytesseract
 import easyocr
 import json
 
 import math
 import re
 
-import argparse
-import tempfile
 import sys
-import os
-
-# CLI
-
-parser = argparse.ArgumentParser(
-    prog='scoreboard-analyser',
-    description='analyse EUC scoreboard screenshots',
-    epilog='Report any bugs to <https://github.com/WellIDKRealy/EUC-Scoreboard-Analyser>')
-
-parser.add_argument('scoreboard', help='scoreboard screenshots path')
-parser.add_argument('-d', '--debug',
-                    action='store_true',
-                    help='enables debug mode')
-parser.add_argument('-s', '--silent',
-                    action='store_true',
-                    help='suepresses unnecessary output')
-
-args = parser.parse_args()
-
-DEBUG = args.debug
-SILENT = args.silent
-
-# END CLI
-
-# Setup environment
-
-CWD = dir_path = os.path.dirname(os.path.realpath(__file__))
-os.chdir(CWD)
-
-OUTPUT_PARENT ='/tmp/scoreboard-analyser-output'
-if not os.path.isdir(OUTPUT_PARENT):
-    os.mkdir(OUTPUT_PARENT)
-
-OUTPUT = tempfile.TemporaryDirectory(dir=OUTPUT_PARENT).name
-os.mkdir(OUTPUT)
-
-def print_log(log):
-    if not SILENT:
-        print(log, file=sys.stderr)
-
-def print_debug(debug):
-    if DEBUG:
-        print(debug, file=sys.stderr)
-
-
-if not os.path.exists(args.scoreboard):
-    print(f'No such file: {args.scoreboard}', file=sys.stderr)
-    exit(2)
-
-# END Setup environment
 
 class IMG_DATA:
     def __init__(self, filtered, debug, ocr):
         self.filtered = filtered
         self.debug = debug
         self.ocr = ocr
+
+class IO_DATA:
+    def __init__(self, log, debug, debug_output, worker_no):
+        self.log = log
+        self.debug = debug
+        self.debug_output = debug_output
+
+        self.worker_no = worker_no
+
+    def print_log(self, msg):
+        if self.log:
+            print(f'[{self.worker_no}] {msg}', file=sys.stderr)
+
+    def print_debug(self, msg):
+        if self.debug:
+            print(f'[{self.worker_no}] {msg}', file=sys.stderr)
 
 def crop_out(img):
     height, width = img.shape[:-1]
@@ -105,8 +68,8 @@ def find_template(img, template):
 
     return mnLoc
 
-def ocr(img, reader, whitelist=None):
-    # os.chdir(OUTPUT)
+def ocr(img, reader, io, whitelist=None):
+    # os.chdir(io.debug_OUTPUT)
     # string = pytesseract.image_to_string(img, lang='eng', config='--psm 7').strip()
     # os.chdir(CWD)
 
@@ -119,8 +82,7 @@ def ocr(img, reader, whitelist=None):
     # kernel = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
     # img = cv2.dilate(img, kernel)
     # img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)[:,:,2]
-    cv2.imwrite('/tmp/test.png', img)
-
+    # cv2.imwrite('/tmp/test.png', img)
 
     string = reader.readtext(img, detail=0, text_threshold=0.5, allowlist=whitelist)
 
@@ -129,24 +91,23 @@ def ocr(img, reader, whitelist=None):
 
 def extract_int(string):
     string = string.replace('O', '0').replace('S', '5')
-    print_debug(string)
     groups = re.match('[^\d]*(\d+)[^\d]*', string).groups()
     return int(groups[0])
 
-def get_int_template(dimg, template, reader, factor_left=0, factor_right=1):
+def get_int_template(dimg, template, reader, io, factor_left=0, factor_right=1):
     x, y = find_template(dimg.filtered, template)
     rows, cols = template.shape
 
-    if DEBUG:
+    if io.debug:
         cv2.rectangle(dimg.debug, (x, y), (x + cols, y + rows), 255, 1)
         cv2.rectangle(dimg.debug, (x - math.floor(cols*factor_left), y), (x + math.floor(cols*factor_right), y + rows), 255, 1)
 
     img = dimg.ocr[y:(y + rows),
                    (x - math.floor(cols*factor_left)):(x + math.floor(cols*factor_right))]
 
-    return extract_int(ocr(img, reader))
+    return int(ocr(img, reader, io, whitelist='0123456789'))
 
-def get_faction_name_and_player_count(dimg, reader):
+def get_faction_name_and_player_count(dimg, player_count_template, reader, io):
     factor_left = 3.5/7
     factor_right = 1
     factor_right_name = 4
@@ -154,7 +115,7 @@ def get_faction_name_and_player_count(dimg, reader):
     x, y = find_template(dimg.filtered, player_count_template)
     rows, cols = player_count_template.shape
 
-    if DEBUG:
+    if io.debug:
         cv2.rectangle(dimg.debug, (x, y), (x + cols, y + rows), 255, 1)
         cv2.rectangle(dimg.debug, (x - math.floor(cols*factor_left), y), (x + math.floor(cols*factor_right), y + rows), 255, 1)
         cv2.rectangle(dimg.debug, (x - math.floor(cols*factor_left), y - rows*2), (x + math.floor(cols*factor_right_name), y), 255, 1)
@@ -165,19 +126,19 @@ def get_faction_name_and_player_count(dimg, reader):
     img_name = dimg.ocr[y - rows*2:y,
                         x - math.floor(cols*factor_left):x + math.floor(cols*factor_right_name)]
 
-    return (extract_int(ocr(img_player_count, reader)),
-            ocr(img_name, reader))
+    return (extract_int(ocr(img_player_count, reader, io)),
+            ocr(img_name, reader, io))
 
 # def get_player_count(img):
 #     return get_int_template(img, player_count_template, 3.5/7, debug_img=debug_img)
 
-def get_alive_count(dimg, reader):
-    return get_int_template(dimg, alive_count_template, reader, 3.5/5, 0)
+def get_alive_count(dimg, alive_count_template, reader, io):
+    return get_int_template(dimg, alive_count_template, reader, io, 3.5/5, 0)
 
-def get_score(dimg, reader):
-    return get_int_template(dimg, score_template, reader, -1, 8/6)
+def get_score(dimg, score_template, reader, io):
+    return get_int_template(dimg, score_template, reader, io, -1, 8/6)
 
-def get_bounding_lines(dimg, pixel_height):
+def get_bounding_lines(dimg, pixel_height, io):
     results = []
     height, width = dimg.filtered.shape
 
@@ -186,14 +147,13 @@ def get_bounding_lines(dimg, pixel_height):
         start_x, start_y, end_x, end_y = line[0]
         if(abs(start_y - end_y) < 2):
             results.append(line[0])
-            if DEBUG:
+            if io.debug:
                 cv2.line(dimg.debug,
                          (start_x, start_y),
                          (end_x, end_y),
                          255,
                          3)
 
-    print(lines)
     assert(len(lines) == 2)
 
     if results[0][1] < results[1][1]:
@@ -201,18 +161,18 @@ def get_bounding_lines(dimg, pixel_height):
     return (results[1], results[0])
 
 
-def get_player_data(dimg, team_player_count, player_count, reader):
-    player_x, player_y = find_template(dimg.filtered, player_template)
-    player_rows, player_cols = player_template.shape
+def get_player_data(dimg, team_player_count, player_count, templates, reader, io):
+    player_x, player_y = find_template(dimg.filtered, templates['player'])
+    player_rows, player_cols = templates['player'].shape
 
-    kills_x, kills_y = find_template(dimg.filtered, kills_template)
-    kills_rows, kills_cols = kills_template.shape
+    kills_x, kills_y = find_template(dimg.filtered, templates['kills'])
+    kills_rows, kills_cols = templates['kills'].shape
 
-    deaths_x, deaths_y = find_template(dimg.filtered, deaths_template)
-    deaths_rows, deaths_cols = deaths_template.shape
+    deaths_x, deaths_y = find_template(dimg.filtered, templates['deaths'])
+    deaths_rows, deaths_cols = templates['deaths'].shape
 
-    ping_x, ping_y = find_template(dimg.filtered, ping_template)
-    ping_rows, ping_cols = ping_template.shape
+    ping_x, ping_y = find_template(dimg.filtered, templates['ping'])
+    ping_rows, ping_cols = templates['ping'].shape
 
     # Extrapolate location of Alive
     alive_rows = kills_rows
@@ -221,7 +181,7 @@ def get_player_data(dimg, team_player_count, player_count, reader):
     alive_x = (player_x + player_cols - alive_cols//2 + kills_x)//2
     alive_y = (player_y + kills_y)//2
 
-    if DEBUG:
+    if io.debug:
         cv2.rectangle(dimg.debug,
                       (player_x, player_y),
                       (player_x+player_cols, player_y+player_rows),
@@ -252,7 +212,7 @@ def get_player_data(dimg, team_player_count, player_count, reader):
                       255,
                       1)
 
-    bound_up, bound_down = get_bounding_lines(dimg, 3)
+    bound_up, bound_down = get_bounding_lines(dimg, 3, io)
 
 
     start_x, start_y, end_x = bound_up[:3]
@@ -273,17 +233,17 @@ def get_player_data(dimg, team_player_count, player_count, reader):
 
         out = {}
 
-        print_log(f'PROCESSING {i + 1}/{team_player_count}')
+        io.print_log(f'PROCESSING {i + 1}/{team_player_count}')
 
         NUMS = '0123456789'
 
-        out['name'] = ocr(dimg.ocr[y:y + isize_y, player_x:player_x + player_cols], reader)
-        out['alive'] = ocr(dimg.ocr[y:y + isize_y, alive_x:alive_x + alive_cols], reader)
-        out['kills'] = ocr(dimg.ocr[y:y + isize_y, kills_x:kills_x + kills_cols], reader, NUMS)
-        out['deaths'] = ocr(dimg.ocr[y:y + isize_y, deaths_x:deaths_x + deaths_cols], reader, NUMS)
-        out['ping'] = ocr(dimg.ocr[y:y + isize_y, ping_x - ping_cols//4:ping_x + ping_cols], reader, NUMS)
+        out['name'] = ocr(dimg.ocr[y:y + isize_y, player_x:player_x + player_cols], reader, io)
+        out['alive'] = ocr(dimg.ocr[y:y + isize_y, alive_x:alive_x + alive_cols], reader, io)
+        out['kills'] = ocr(dimg.ocr[y:y + isize_y, kills_x:kills_x + kills_cols], reader, io, whitelist=NUMS)
+        out['deaths'] = ocr(dimg.ocr[y:y + isize_y, deaths_x:deaths_x + deaths_cols], reader, io, whitelist=NUMS)
+        out['ping'] = ocr(dimg.ocr[y:y + isize_y, ping_x - ping_cols//4:ping_x + ping_cols], reader, io, whitelist=NUMS)
 
-        if DEBUG:
+        if io.debug:
             cv2.rectangle(dimg.debug, (player_x, y), (player_x + player_cols, y + isize_y), 255, 2)
             cv2.rectangle(dimg.debug, (alive_x, y), (alive_x + alive_cols, y + isize_y), 255, 2)
             cv2.rectangle(dimg.debug, (kills_x, y), (kills_x + kills_cols, y + isize_y), 255, 2)
@@ -295,86 +255,88 @@ def get_player_data(dimg, team_player_count, player_count, reader):
 
 # MAIN
 
-print_log('READING IMAGE')
-img = cv2.imread(args.scoreboard)
+def process_image(path, io):
+    io.print_log('READING IMAGE')
+    img = cv2.imread(path)
 
-# TEMPLATES
+    # TEMPLATES
 
-height, width = img.shape[:-1]
+    height, width = img.shape[:-1]
 
-print_log('READING TEMPLATES FOR RESOLUTION')
-player_template = filter_background(cv2.imread(f'Templates/{width}x{height}/PlayerName.png'))
-kills_template = filter_background(cv2.imread(f'Templates/{width}x{height}/Kills.png'))
-deaths_template = filter_background(cv2.imread(f'Templates/{width}x{height}/Deaths.png'))
-ping_template = filter_background(cv2.imread(f'Templates/{width}x{height}/Ping.png'))
+    io.print_log('READING TEMPLATES FOR RESOLUTION')
+    templates = {}
+    templates['player'] = filter_background(cv2.imread(f'Templates/{width}x{height}/PlayerName.png'))
+    templates['kills'] = filter_background(cv2.imread(f'Templates/{width}x{height}/Kills.png'))
+    templates['deaths'] = filter_background(cv2.imread(f'Templates/{width}x{height}/Deaths.png'))
+    templates['ping'] = filter_background(cv2.imread(f'Templates/{width}x{height}/Ping.png'))
 
-player_count_template = filter_background(cv2.imread(f'Templates/{width}x{height}/PlayerCount.png'))
-alive_count_template = filter_background(cv2.imread(f'Templates/{width}x{height}/AliveCount.png'))
-score_template = filter_background(cv2.imread(f'Templates/{width}x{height}/Score.png'))
+    player_count_template = filter_background(cv2.imread(f'Templates/{width}x{height}/PlayerCount.png'))
+    alive_count_template = filter_background(cv2.imread(f'Templates/{width}x{height}/AliveCount.png'))
+    score_template = filter_background(cv2.imread(f'Templates/{width}x{height}/Score.png'))
 
-# END TEMPLATES
+    # END TEMPLATES
 
-print_log('FILTERING')
+    io.print_log('FILTERING')
 
-cropped = crop_out(img)
-filtered = filter_background(cropped)
-ocr_img = filter_background_ocr(cropped)
+    cropped = crop_out(img)
+    filtered = filter_background(cropped)
+    ocr_img = filter_background_ocr(cropped)
 
-if DEBUG:
-    cv2.imwrite(f'{OUTPUT}/filtered.png', filtered)
+    if io.debug:
+        cv2.imwrite(f'{io.debug_output}/filtered.png', filtered)
 
-team_one = get_team_one(filtered)
-team_one = IMG_DATA(team_one, np.copy(team_one) if DEBUG else None, get_team_one(ocr_img))
+    team_one = get_team_one(filtered)
+    team_one = IMG_DATA(team_one, np.copy(team_one) if io.debug else None, get_team_one(ocr_img))
 
-team_two = get_team_two(filtered)
-team_two = IMG_DATA(team_two, np.copy(team_two) if DEBUG else None, get_team_two(ocr_img))
+    team_two = get_team_two(filtered)
+    team_two = IMG_DATA(team_two, np.copy(team_two) if io.debug else None, get_team_two(ocr_img))
 
-try:
-    print_log('INITIALIZING OCR')
-    reader = easyocr.Reader(['en'])
+    try:
+        io.print_log('INITIALIZING OCR')
+        reader = easyocr.Reader(['en'])
 
-    print_log('SCRAPING PLAYER COUNTS')
-    team_one_player_count, team_one_name = get_faction_name_and_player_count(team_one, reader)
-    team_two_player_count, team_two_name = get_faction_name_and_player_count(team_two, reader)
+        io.print_log('SCRAPING PLAYER COUNTS')
+        team_one_player_count, team_one_name = get_faction_name_and_player_count(team_one, player_count_template, reader, io)
+        team_two_player_count, team_two_name = get_faction_name_and_player_count(team_two, player_count_template, reader, io)
 
-    # team_one_player_count = get_player_count(team_one)
-    # team_two_player_count = get_player_count(team_two)
+        # team_one_player_count = get_player_count(team_one)
+        # team_two_player_count = get_player_count(team_two)
 
-    print_log('SCRAPING ALIVE COUNTS')
-    team_one_alive_count = get_alive_count(team_one, reader)
-    team_two_alive_count = get_alive_count(team_two, reader)
+        io.print_log('SCRAPING ALIVE COUNTS')
+        team_one_alive_count = get_alive_count(team_one, alive_count_template, reader, io)
+        team_two_alive_count = get_alive_count(team_two, alive_count_template, reader, io)
 
-    print_log('SCRAPING SCORES COUNTS')
-    team_one_score = get_score(team_one, reader)
-    team_two_score = get_score(team_two, reader)
+        io.print_log('SCRAPING SCORES COUNTS')
+        team_one_score = get_score(team_one, score_template, reader, io)
+        team_two_score = get_score(team_two, score_template, reader, io)
 
-    player_count = max(team_one_player_count, team_two_player_count)
+        player_count = max(team_one_player_count, team_two_player_count)
 
-    print_log(f'PLAYER_COUNT: {team_one_player_count + team_two_player_count}')
+        io.print_log(f'PLAYER_COUNT: {team_one_player_count + team_two_player_count}')
 
-    print_log('SCRAPING TEAM 1 PLAYER DATA')
-    team_one_player_data = get_player_data(team_one, team_one_player_count, player_count, reader)
+        io.print_log('SCRAPING TEAM 1 PLAYER DATA')
+        team_one_player_data = get_player_data(team_one, team_one_player_count, player_count, templates, reader, io)
 
-    print_log('SCRAPING TEAM 2 PLAYER DATA')
-    team_two_player_data = get_player_data(team_two, team_two_player_count, player_count, reader)
-finally:
-    if DEBUG:
-        cv2.imwrite(f'{OUTPUT}/team_one.png', team_one.debug)
-        cv2.imwrite(f'{OUTPUT}/team_two.png', team_two.debug)
-        print_debug(f'DEBUG OUTPUT: {OUTPUT}')
+        io.print_log('SCRAPING TEAM 2 PLAYER DATA')
+        team_two_player_data = get_player_data(team_two, team_two_player_count, player_count, templates, reader, io)
+    finally:
+        if io.debug:
+            cv2.imwrite(f'{io.debug_output}/team_one.png', team_one.debug)
+            cv2.imwrite(f'{io.debug_output}/team_two.png', team_two.debug)
+            io.print_debug(f'DEBUG OUTPUT: {io.output}')
 
-print(json.dumps({
-    'team1' : {
-        'score': team_one_score,
-        'name': team_one_name,
-        'alive': team_one_alive_count,
-        'players_no': team_one_player_count,
-        'players': team_one_player_data
-    },
-    'team2' : {
-        'score': team_two_score,
-        'name': team_two_name,
-        'alive': team_two_alive_count,
-        'players_no': team_two_player_count,
-        'players': team_two_player_data
-    }}))
+    return {
+        'team1' : {
+            'score': team_one_score,
+            'name': team_one_name,
+            'alive': team_one_alive_count,
+            'players_no': team_one_player_count,
+            'players': team_one_player_data
+        },
+        'team2' : {
+            'score': team_two_score,
+            'name': team_two_name,
+            'alive': team_two_alive_count,
+            'players_no': team_two_player_count,
+            'players': team_two_player_data
+        }}

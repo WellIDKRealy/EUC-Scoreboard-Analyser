@@ -137,8 +137,7 @@
    (license #f)))
 
 (packages->manifest
- (cons* python-pytesseract
-	python-easyocr
+ (cons* python-easyocr
 	(specifications->packages
 	 '("python"
 	   "opencv"
