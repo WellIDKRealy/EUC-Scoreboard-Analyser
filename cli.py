@@ -39,11 +39,11 @@ LOG = not args.silent
 
 def print_log(msg):
     if LOG:
-        print(msg)
+        print(msg, file=sys.stderr)
 
 def print_debug(msg):
     if DEBUG:
-        print(msg)
+        print(msg, file=sys.stderr)
 
 # END LOGGING/DEBUGGED
 
@@ -62,16 +62,17 @@ if NPROC <= 0:
 CWD = dir_path = os.path.dirname(os.path.realpath(__file__))
 os.chdir(CWD)
 
-# OUTPUT_PARENT ='/tmp/scoreboard-analyser-output'
-# if not os.path.isdir(OUTPUT_PARENT):
-#     os.mkdir(OUTPUT_PARENT)
+OUTPUT_PARENT ='/tmp/scoreboard-analyser-output'
+if not os.path.isdir(OUTPUT_PARENT):
+    os.mkdir(OUTPUT_PARENT)
 
 scoreboards = []
 for scoreboard in args.scoreboard:
-    if os.path.exists(scoreboard):
-        scoreboards.append(scoreboard)
+    real_path = os.path.realpath(scoreboard)
+    if os.path.exists(real_path):
+        scoreboards.append(real_path)
     else:
-        print_log(f'No such file: {scoreboard}')
+        print_log(f'No such file: {real_path}')
 
 if scoreboards == [] and not args.batch:
     exit(2)
@@ -80,12 +81,11 @@ if scoreboards == [] and not args.batch:
 
 # MAIN
 
+OUT = []
 WORKER_NO = 0
 def process_scoreboard(scoreboard):
     global WORKER_NO
-    debug_output = tempfile.TemporaryDirectory(
-        # dir=OUTPUT_PARENT
-    ).name
+    debug_output = tempfile.TemporaryDirectory(dir=OUTPUT_PARENT).name
     os.mkdir(debug_output)
 
     worker_no = WORKER_NO
@@ -96,23 +96,28 @@ def process_scoreboard(scoreboard):
                       print_debug,
                       worker_no)
 
-    x = pool.apply(main.process_image,
-                   (scoreboard, io))
-
-    #,
-    #                 callback=lambda res: print(res),
-     #                error_callback=lambda e: print(e, file=sys.stderr))
+    pool.apply_async(main.process_image,
+                     (scoreboard, io),
+                     callback=lambda res: OUT.append(res),
+                     error_callback=lambda e: print(e, file=sys.stderr))
 
 with mp.Pool(NPROC) as pool:
     import main
+    print(scoreboards)
     for scoreboard in scoreboards:
         process_scoreboard(scoreboard)
 
     if args.batch:
         while scoreboard := sys.stdin.readline():
-            if os.path.exists(scoreboard):
-                process_scoreboard(scoreboard)
+            scoreboard = scoreboard[:-1]
+            real_path = os.path.realpath(scoreboard)
+            if os.path.exists(real_path):
+                process_scoreboard(real_path)
             else:
                 print_log(f'No such file: {scoreboard}')
 
+    pool.close()
+    pool.join()
+
+print(json.dumps(OUT))
 # END MAIN

@@ -40,8 +40,6 @@ def filter_background(img):
     grayscale = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)[:,:,2]
     _, thresh = cv2.threshold(grayscale, 100, 255, cv2.THRESH_BINARY)
 
-    print(thresh.shape)
-
     return thresh
 
 def filter_background_ocr(img):
@@ -68,7 +66,7 @@ def find_template(img, template):
 
     return mnLoc
 
-def ocr(img, reader, io, whitelist=None):
+def ocr(img, reader, io, sep=' ', whitelist=None):
     # os.chdir(io.debug_OUTPUT)
     # string = pytesseract.image_to_string(img, lang='eng', config='--psm 7').strip()
     # os.chdir(CWD)
@@ -84,10 +82,10 @@ def ocr(img, reader, io, whitelist=None):
     # img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)[:,:,2]
     # cv2.imwrite('/tmp/test.png', img)
 
-    string = reader.readtext(img, detail=0, text_threshold=0.5, allowlist=whitelist)
+    string = reader.readtext(img, paragraph=True, detail=0, text_threshold=0.5, allowlist=whitelist)
 
     assert(string != [])
-    return ' '.join(string)
+    return string[0]
 
 def extract_int(string):
     string = string.replace('O', '0').replace('S', '5')
@@ -100,12 +98,12 @@ def get_int_template(dimg, template, reader, io, factor_left=0, factor_right=1):
 
     if io.debug:
         cv2.rectangle(dimg.debug, (x, y), (x + cols, y + rows), 255, 1)
-        cv2.rectangle(dimg.debug, (x - math.floor(cols*factor_left), y), (x + math.floor(cols*factor_right), y + rows), 255, 1)
+        cv2.rectangle(dimg.debug, (x - math.floor(cols*factor_left), y), (x + math.floor(cols*factor_right), y + rows), 255, 2)
 
     img = dimg.ocr[y:(y + rows),
                    (x - math.floor(cols*factor_left)):(x + math.floor(cols*factor_right))]
 
-    return int(ocr(img, reader, io, whitelist='0123456789'))
+    return int(ocr(img, reader, io, sep='', whitelist='0123456789'))
 
 def get_faction_name_and_player_count(dimg, player_count_template, reader, io):
     factor_left = 3.5/7
@@ -117,7 +115,7 @@ def get_faction_name_and_player_count(dimg, player_count_template, reader, io):
 
     if io.debug:
         cv2.rectangle(dimg.debug, (x, y), (x + cols, y + rows), 255, 1)
-        cv2.rectangle(dimg.debug, (x - math.floor(cols*factor_left), y), (x + math.floor(cols*factor_right), y + rows), 255, 1)
+        cv2.rectangle(dimg.debug, (x - math.floor(cols*factor_left), y), (x + math.floor(cols*factor_right), y + rows), 255, 2)
         cv2.rectangle(dimg.debug, (x - math.floor(cols*factor_left), y - rows*2), (x + math.floor(cols*factor_right_name), y), 255, 1)
 
     img_player_count = dimg.ocr[y:(y + rows),
@@ -326,6 +324,7 @@ def process_image(path, io):
             io.print_debug(f'DEBUG OUTPUT: {io.output}')
 
     return {
+        "path": path,
         'team1' : {
             'score': team_one_score,
             'name': team_one_name,
