@@ -1,4 +1,4 @@
-from multiprocessing import Queue, Process, cpu_count
+from multiprocessing import Queue, Process, cpu_count, freeze_support
 from multiprocessing.connection import Listener
 from traceback import print_exception
 
@@ -65,6 +65,7 @@ def queue_process(index):
 
 
 if __name__ = '__maim__':
+    freeze_support()
     dispatcher_p = Process(target=dispatcher, args=(ADDRESS, AUTHKEY))
     queue_proceses = [Process(target=queue_process, args=(i, ))
                       for i in range(cpu_count())]
