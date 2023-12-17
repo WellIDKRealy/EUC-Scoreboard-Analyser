@@ -1,12 +1,14 @@
 import cv2
 import numpy as np
-import easyocr
 import json
 
 import math
 import re
+import tempfile
 
 import sys
+
+from monad import Error, Ok, is_error
 
 class IMG_DATA:
     def __init__(self, filtered, debug, ocr):
@@ -29,6 +31,14 @@ class IO_DATA:
     def print_debug(self, msg):
         if self.debug:
             print(f'[{self.worker_no}] {msg}', file=sys.stderr)
+
+    def dump_image(self, name, img):
+        path = tempfile.NamedTemporaryFile(prefix=name, suffix='.png', dir=self.debug_output).name
+
+        if self.debug:
+            cv2.imwrite(path, img)
+
+        return path
 
 def crop_out(img):
     height, width = img.shape[:-1]
@@ -82,15 +92,29 @@ def ocr(img, reader, io, sep=' ', whitelist=None):
     # img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)[:,:,2]
     # cv2.imwrite('/tmp/test.png', img)
 
-    string = reader.readtext(img, paragraph=True, detail=0, text_threshold=0.5, allowlist=whitelist)
+    recognised = reader.readtext(img, allowlist=whitelist)
 
-    assert(string != [])
-    return string[0]
+    if recognised == []:
+        path = io.dump_image('ocr', img)
+        io.print_debug(f'COULD\'T FIND TEXT IN IMAGE {path}')
+        return Error(f'COULD\'T FIND TEXT IN IMAGE {path}')
 
-def extract_int(string):
+    result = max(recognised, key=lambda x: x[2])
+    return Ok((result[1], result[2]))
+
+def extract_int(maybe_string, io):
+    if is_error(maybe_string):
+        return maybe_string
+    string, confidence = maybe_string.value
+
     string = string.replace('O', '0').replace('S', '5')
-    groups = re.match('[^\d]*(\d+)[^\d]*', string).groups()
-    return int(groups[0])
+    groups = re.match('[^\d]*(\d+)[^\d]*', string)
+
+    if groups is None:
+        io.print_debug(f'COULD\'T MATCH DIGITS {string}')
+        return Error(f'COULD\'T MATCH DIGITS {string}')
+
+    return Ok((int(groups.groups()[0]), confidence))
 
 def get_int_template(dimg, template, reader, io, factor_left=0, factor_right=1):
     x, y = find_template(dimg.filtered, template)
@@ -103,7 +127,7 @@ def get_int_template(dimg, template, reader, io, factor_left=0, factor_right=1):
     img = dimg.ocr[y:(y + rows),
                    (x - math.floor(cols*factor_left)):(x + math.floor(cols*factor_right))]
 
-    return int(ocr(img, reader, io, sep='', whitelist='0123456789'))
+    return extract_int(ocr(img, reader, io, whitelist='0123456789'), io)
 
 def get_faction_name_and_player_count(dimg, player_count_template, reader, io):
     factor_left = 3.5/7
@@ -124,7 +148,7 @@ def get_faction_name_and_player_count(dimg, player_count_template, reader, io):
     img_name = dimg.ocr[y - rows*2:y,
                         x - math.floor(cols*factor_left):x + math.floor(cols*factor_right_name)]
 
-    return (extract_int(ocr(img_player_count, reader, io)),
+    return (extract_int(ocr(img_player_count, reader, io), io),
             ocr(img_name, reader, io))
 
 # def get_player_count(img):
@@ -152,14 +176,25 @@ def get_bounding_lines(dimg, pixel_height, io):
                          255,
                          3)
 
-    assert(len(lines) == 2)
+    if len(lines) != 2:
+        path = io.dump_image('lines', dimg.filtered)
+        io.print_debug(f'COULD\'T FIND LINES IMAGE: {path}')
+        return Error(f'COULD\'T FIND LINES IMAGE: {path}')
 
     if results[0][1] < results[1][1]:
-        return (results[0], results[1])
-    return (results[1], results[0])
+        return Ok((results[0], results[1]))
+    return Ok((results[1], results[0]))
 
 
 def get_player_data(dimg, team_player_count, player_count, templates, reader, io):
+    if is_error(team_player_count):
+        return team_player_count
+    team_player_count = team_player_count.value[0]
+
+    if is_error(player_count):
+        return player_count
+    player_count = player_count.value
+
     player_x, player_y = find_template(dimg.filtered, templates['player'])
     player_rows, player_cols = templates['player'].shape
 
@@ -210,8 +245,11 @@ def get_player_data(dimg, team_player_count, player_count, templates, reader, io
                       255,
                       1)
 
-    bound_up, bound_down = get_bounding_lines(dimg, 3, io)
+    result = get_bounding_lines(dimg, 3, io)
+    if is_error(result):
+        return result
 
+    bound_up, bound_down = result.value
 
     start_x, start_y, end_x = bound_up[:3]
     end_y = bound_down[1]
@@ -222,7 +260,7 @@ def get_player_data(dimg, team_player_count, player_count, templates, reader, io
 
     # print(start_x, start_y, player_count)
 
-    size_y = (end_y - start_y)/player_count
+    size_y = (end_y - start_y)/(player_count + 0.5)
     isize_y = round(size_y)
 
     results = []
@@ -236,10 +274,10 @@ def get_player_data(dimg, team_player_count, player_count, templates, reader, io
         NUMS = '0123456789'
 
         out['name'] = ocr(dimg.ocr[y:y + isize_y, player_x:player_x + player_cols], reader, io)
-        out['alive'] = ocr(dimg.ocr[y:y + isize_y, alive_x:alive_x + alive_cols], reader, io)
-        out['kills'] = ocr(dimg.ocr[y:y + isize_y, kills_x:kills_x + kills_cols], reader, io, whitelist=NUMS)
-        out['deaths'] = ocr(dimg.ocr[y:y + isize_y, deaths_x:deaths_x + deaths_cols], reader, io, whitelist=NUMS)
-        out['ping'] = ocr(dimg.ocr[y:y + isize_y, ping_x - ping_cols//4:ping_x + ping_cols], reader, io, whitelist=NUMS)
+        out['alive'] = extract_int(ocr(dimg.ocr[y:y + isize_y, alive_x:alive_x + alive_cols], reader, io, whitelist=NUMS), io)
+        out['kills'] = extract_int(ocr(dimg.ocr[y:y + isize_y, kills_x:kills_x + kills_cols], reader, io, whitelist=NUMS), io)
+        out['deaths'] = extract_int(ocr(dimg.ocr[y:y + isize_y, deaths_x:deaths_x + deaths_cols], reader, io, whitelist=NUMS), io)
+        out['ping'] = extract_int(ocr(dimg.ocr[y:y + isize_y, ping_x - ping_cols//4:ping_x + ping_cols], reader, io, whitelist=NUMS), io)
 
         if io.debug:
             cv2.rectangle(dimg.debug, (player_x, y), (player_x + player_cols, y + isize_y), 255, 2)
@@ -249,13 +287,15 @@ def get_player_data(dimg, team_player_count, player_count, templates, reader, io
             cv2.rectangle(dimg.debug, (ping_x - ping_cols//4, y), (ping_x + ping_cols, y + isize_y), 255, 2)
 
         results.append(out)
-    return results
+    return Ok(results)
 
 # MAIN
 
-def process_image(path, io):
+def process_image(path, reader, io):
     io.print_log('READING IMAGE')
     img = cv2.imread(path)
+
+    io.print_debug(f'DEBUG OUTPUT: {io.debug_output}')
 
     # TEMPLATES
 
@@ -290,8 +330,10 @@ def process_image(path, io):
     team_two = IMG_DATA(team_two, np.copy(team_two) if io.debug else None, get_team_two(ocr_img))
 
     try:
-        io.print_log('INITIALIZING OCR')
-        reader = easyocr.Reader(['en'])
+        if reader is None:
+            io.print_log('INITIALIZING OCR')
+            import easyocr
+            reader = easyocr.Reader(['en'])
 
         io.print_log('SCRAPING PLAYER COUNTS')
         team_one_player_count, team_one_name = get_faction_name_and_player_count(team_one, player_count_template, reader, io)
@@ -308,9 +350,14 @@ def process_image(path, io):
         team_one_score = get_score(team_one, score_template, reader, io)
         team_two_score = get_score(team_two, score_template, reader, io)
 
-        player_count = max(team_one_player_count, team_two_player_count)
+        player_count = None
+        if is_error(team_one_player_count) or is_error(team_two_player_count):
+            player_count = Error('Cannot calculate player count')
+            io.print_log(f'CANNOT CALCULATE PLAYER COUNT')
+        else:
+            player_count = Ok(max(team_one_player_count.value[0], team_two_player_count.value[0]))
+            io.print_log(f'PLAYER COUNT: {team_one_player_count.value[0] + team_two_player_count.value[0]}')
 
-        io.print_log(f'PLAYER_COUNT: {team_one_player_count + team_two_player_count}')
 
         io.print_log('SCRAPING TEAM 1 PLAYER DATA')
         team_one_player_data = get_player_data(team_one, team_one_player_count, player_count, templates, reader, io)
@@ -321,21 +368,35 @@ def process_image(path, io):
         if io.debug:
             cv2.imwrite(f'{io.debug_output}/team_one.png', team_one.debug)
             cv2.imwrite(f'{io.debug_output}/team_two.png', team_two.debug)
-            io.print_debug(f'DEBUG OUTPUT: {io.output}')
+
+
+    # Unpack Monads
+    if is_error(team_one_player_data):
+        team_one_player_data = team_one_player_data.to_dict()
+    else:
+        team_one_player_data = [{i: j.to_dict() for i, j in k.items()} for k in team_one_player_data.value]
+
+
+    if is_error(team_two_player_data):
+        team_two_player_data = team_two_player_data.to_dict()
+    else:
+        team_two_player_data = [{i: j.to_dict() for i, j in k.items()} for k in team_two_player_data.value]
+
+
 
     return {
-        "path": path,
+        'path': path,
         'team1' : {
-            'score': team_one_score,
-            'name': team_one_name,
-            'alive': team_one_alive_count,
-            'players_no': team_one_player_count,
+            'score': team_one_score.to_dict(),
+            'name': team_one_name.to_dict(),
+            'alive': team_one_alive_count.to_dict(),
+            'players_no': team_one_player_count.to_dict(),
             'players': team_one_player_data
         },
         'team2' : {
-            'score': team_two_score,
-            'name': team_two_name,
-            'alive': team_two_alive_count,
-            'players_no': team_two_player_count,
+            'score': team_two_score.to_dict(),
+            'name': team_two_name.to_dict(),
+            'alive': team_two_alive_count.to_dict(),
+            'players_no': team_two_player_count.to_dict(),
             'players': team_two_player_data
         }}

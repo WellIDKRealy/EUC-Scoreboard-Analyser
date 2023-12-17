@@ -5,6 +5,10 @@ import argparse
 import tempfile
 import sys
 import os
+import traceback
+
+import main
+import remote_reader
 
 # CLI
 
@@ -25,6 +29,16 @@ parser.add_argument('-s', '--silent',
 parser.add_argument('-b', '--batch',
                     action='store_true',
                     help='reads paths from stdin names')
+parser.add_argument('--debug-dir',
+                    help='directory to which debug data is outputed')
+parser.add_argument('--ocr-server',
+                    help='ocr server address')
+parser.add_argument('--ocr-authkey',
+                    help='ocr server authkey')
+parser.add_argument('--ocr-port',
+                    default=2137,
+                    type=int,
+                    help='ocr server port')
 parser.add_argument('-n', '--nproc',
                     default=mp.cpu_count(),
                     type=int,
@@ -63,6 +77,9 @@ CWD = dir_path = os.path.dirname(os.path.realpath(__file__))
 os.chdir(CWD)
 
 OUTPUT_PARENT ='/tmp/scoreboard-analyser-output'
+if args.debug_dir is not None:
+    OUTPUT_PARENT = args.debug_dir
+
 if not os.path.isdir(OUTPUT_PARENT):
     os.mkdir(OUTPUT_PARENT)
 
@@ -83,7 +100,7 @@ if scoreboards == [] and not args.batch:
 
 OUT = []
 WORKER_NO = 0
-def process_scoreboard(scoreboard):
+def process_scoreboard(scoreboard, reader):
     global WORKER_NO
     debug_output = tempfile.TemporaryDirectory(dir=OUTPUT_PARENT).name
     os.mkdir(debug_output)
@@ -93,26 +110,26 @@ def process_scoreboard(scoreboard):
 
     io = main.IO_DATA(LOG,
                       DEBUG,
-                      print_debug,
+                      debug_output,
                       worker_no)
 
     pool.apply_async(main.process_image,
-                     (scoreboard, io),
+                     (scoreboard, reader, io),
                      callback=lambda res: OUT.append(res),
-                     error_callback=lambda e: print(e, file=sys.stderr))
+                     error_callback=lambda e: traceback.print_exception(e))
+
+reader = None if args.ocr_server is None else remote_reader.Reader(args.ocr_server, args.ocr_port, args.ocr_authkey)
 
 with mp.Pool(NPROC) as pool:
-    import main
-    print(scoreboards)
     for scoreboard in scoreboards:
-        process_scoreboard(scoreboard)
+        process_scoreboard(scoreboard, reader)
 
     if args.batch:
         while scoreboard := sys.stdin.readline():
             scoreboard = scoreboard[:-1]
             real_path = os.path.realpath(scoreboard)
             if os.path.exists(real_path):
-                process_scoreboard(real_path)
+                process_scoreboard(real_path, reader)
             else:
                 print_log(f'No such file: {scoreboard}')
 
