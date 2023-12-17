@@ -28,10 +28,7 @@ AUTHKEY = args.authkey.encode('utf-8')
 # Moved down as it takes long time to load
 import easyocr
 
-connection_queue = Queue()
-
-def dispatcher(address, authkey):
-    global connection_queue
+def dispatcher(queue, address, authkey):
     print('[Dispatcher] Started')
     with Listener(address, authkey=authkey) as listener:
         while True:
@@ -41,8 +38,7 @@ def dispatcher(address, authkey):
                 print_exception(e)
 
 
-def queue_process(index):
-    global connection_queue
+def queue_process(queue, index):
     print(f'[{index}] Started process')
 
     reader = easyocr.Reader(['en'])
@@ -66,8 +62,10 @@ def queue_process(index):
 
 if __name__ == '__maim__':
     freeze_support()
-    dispatcher_p = Process(target=dispatcher, args=(ADDRESS, AUTHKEY))
-    queue_proceses = [Process(target=queue_process, args=(i, ))
+    queue = Queue()
+
+    dispatcher_p = Process(target=dispatcher, args=(queue, ADDRESS, AUTHKEY))
+    queue_proceses = [Process(target=queue_process, args=(queue, i, ))
                       for i in range(cpu_count())]
 
     dispatcher_p.start()
