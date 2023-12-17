@@ -5,28 +5,45 @@ Analyser that tries to extract data from EU Commadner scoreboard screenshoots
 ## Deployment
 ### GNU/GUIX
 ```bash
-   guix shell --pure -m manifest.scm  -C -N --no-cwd
+guix shell --pure -m manifest.scm  -C -N --no-cwd
 ```
-#### Windows
-Download and install python(3.10)
+### Windows
+#### Install Python 3.10
+https://www.python.org/ftp/python/3.11.7/python-3.11.7-amd64.exe
+Walk through installer MAKE SURE TO CHECK ADD TO PATH CHECKBOX
 
-```bat
-   pip install -r requirements.txt
+#### Install Git
+https://github.com/git-for-windows/git/releases/download/v2.43.0.windows.1/Git-2.43.0-64-bit.exe
+
+#### Install Visual C++ Redistributable
+https://aka.ms/vs/16/release/vc_redist.x64.exe
+
+#### Open Windows terminal
+```bash
+cd Downloads
+git clone https://github.com/WellIDKRealy/EUC-Scoreboard-Analyser.git
+cd EUC-Scoreboard-Analyser
+pip install -r requirements.txt
+```
+
+#### To "Update"
+```bash
+git pull -f
 ```
 
 ## Usage
 ```bash
-   python3 cli.py <path_to_file>
+python3 cli.py <path_to_file>
 ```
 
 For more information use
 ```bash
-   python3 cli.py --help
+python3 cli.py --help
 ```
 
 ## Example
 ```bash
-   python3 cli.py EXAMPLE_SCREEN.png
+python3 cli.py EXAMPLE_SCREEN.png
 ```
 
 ```json
