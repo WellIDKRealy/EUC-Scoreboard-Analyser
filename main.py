@@ -388,7 +388,7 @@ def process_image(path, reader, io):
 
 
     return {
-        'path': path.relative_to(Path('.').absolute()),
+        'path': str(path.relative_to(Path('.').absolute())),
         'team1' : {
             'score': team_one_score.to_dict(),
             'name': team_one_name.to_dict(),
