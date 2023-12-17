@@ -64,17 +64,18 @@ def queue_process(index):
             print_exception(e)
 
 
-dispatcher_p = Process(target=dispatcher, args=(ADDRESS, AUTHKEY))
-queue_proceses = [Process(target=queue_process, args=(i, ))
-                  for i in range(cpu_count())]
+if __name__ = '__maim__':
+    dispatcher_p = Process(target=dispatcher, args=(ADDRESS, AUTHKEY))
+    queue_proceses = [Process(target=queue_process, args=(i, ))
+                      for i in range(cpu_count())]
 
-dispatcher_p.start()
-for p in queue_proceses:
-    p.start()
+    dispatcher_p.start()
+    for p in queue_proceses:
+        p.start()
 
 
-input("TO STOP PRESS ENTER\n")
+    input("TO STOP PRESS ENTER\n")
 
-dispatcher_p.terminate()
-for p in queue_proceses:
-    p.terminate()
+    dispatcher_p.terminate()
+    for p in queue_proceses:
+        p.terminate()
