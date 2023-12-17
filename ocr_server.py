@@ -33,7 +33,7 @@ def dispatcher(queue, address, authkey):
     with Listener(address, authkey=authkey) as listener:
         while True:
             try:
-                connection_queue.put(listener.accept())
+                queue.put(listener.accept())
             except Exception as e:
                 print_exception(e)
 
@@ -45,7 +45,7 @@ def queue_process(queue, index):
 
     while True:
         try:
-            conn = connection_queue.get()
+            conn = queue.get()
             print(f'[{index}] Established connection')
             with conn as conn:
                 try:
