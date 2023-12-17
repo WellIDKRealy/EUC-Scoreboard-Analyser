@@ -3,10 +3,16 @@
 Analyser that tries to extract data from EU Commadner scoreboard screenshoots
 
 ## Deployment
+### GNU/GUIX
 ```bash
    guix shell --pure -m manifest.scm  -C -N --no-cwd
 ```
-For now it requires GNU/Guix
+#### Windows
+Download and install python(3.10)
+
+```bat
+   pip install -r requirements.txt
+```
 
 ## Usage
 ```bash

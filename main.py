@@ -5,8 +5,9 @@ import json
 import math
 import re
 import tempfile
-
 import sys
+
+from pathlib import Path
 
 from monad import Error, Ok, is_error
 
@@ -293,7 +294,7 @@ def get_player_data(dimg, team_player_count, player_count, templates, reader, io
 
 def process_image(path, reader, io):
     io.print_log('READING IMAGE')
-    img = cv2.imread(path)
+    img = cv2.imread(str(path))
 
     io.print_debug(f'DEBUG OUTPUT: {io.debug_output}')
 
@@ -302,15 +303,17 @@ def process_image(path, reader, io):
     height, width = img.shape[:-1]
 
     io.print_log('READING TEMPLATES FOR RESOLUTION')
-    templates = {}
-    templates['player'] = filter_background(cv2.imread(f'Templates/{width}x{height}/PlayerName.png'))
-    templates['kills'] = filter_background(cv2.imread(f'Templates/{width}x{height}/Kills.png'))
-    templates['deaths'] = filter_background(cv2.imread(f'Templates/{width}x{height}/Deaths.png'))
-    templates['ping'] = filter_background(cv2.imread(f'Templates/{width}x{height}/Ping.png'))
 
-    player_count_template = filter_background(cv2.imread(f'Templates/{width}x{height}/PlayerCount.png'))
-    alive_count_template = filter_background(cv2.imread(f'Templates/{width}x{height}/AliveCount.png'))
-    score_template = filter_background(cv2.imread(f'Templates/{width}x{height}/Score.png'))
+    templates_dir = Path('Templates') / f'{width}x{height}'
+    templates = {}
+    templates['player'] = filter_background(cv2.imread(str(templates_dir / 'PlayerName.png')))
+    templates['kills'] = filter_background(cv2.imread(str(templates_dir / 'Kills.png')))
+    templates['deaths'] = filter_background(cv2.imread(str(templates_dir / 'Deaths.png')))
+    templates['ping'] = filter_background(cv2.imread(str(templates_dir / 'Ping.png')))
+
+    player_count_template = filter_background(cv2.imread(str(templates_dir / 'PlayerCount.png')))
+    alive_count_template = filter_background(cv2.imread(str(templates_dir / 'AliveCount.png')))
+    score_template = filter_background(cv2.imread(str(templates_dir / 'Score.png')))
 
     # END TEMPLATES
 
@@ -321,7 +324,7 @@ def process_image(path, reader, io):
     ocr_img = filter_background_ocr(cropped)
 
     if io.debug:
-        cv2.imwrite(f'{io.debug_output}/filtered.png', filtered)
+        cv2.imwrite(io.debug_output / 'filtered.png', filtered)
 
     team_one = get_team_one(filtered)
     team_one = IMG_DATA(team_one, np.copy(team_one) if io.debug else None, get_team_one(ocr_img))
@@ -366,8 +369,8 @@ def process_image(path, reader, io):
         team_two_player_data = get_player_data(team_two, team_two_player_count, player_count, templates, reader, io)
     finally:
         if io.debug:
-            cv2.imwrite(f'{io.debug_output}/team_one.png', team_one.debug)
-            cv2.imwrite(f'{io.debug_output}/team_two.png', team_two.debug)
+            cv2.imwrite(io.debug_output / 'team_one.png', team_one.debug)
+            cv2.imwrite(io.debug_output / 'team_two.png', team_two.debug)
 
 
     # Unpack Monads
@@ -385,7 +388,7 @@ def process_image(path, reader, io):
 
 
     return {
-        'path': path,
+        'path': path.relative_to(Path('.').absolute()),
         'team1' : {
             'score': team_one_score.to_dict(),
             'name': team_one_name.to_dict(),

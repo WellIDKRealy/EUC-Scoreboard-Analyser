@@ -7,6 +7,8 @@ import sys
 import os
 import traceback
 
+from pathlib import Path
+
 import main
 import remote_reader
 
@@ -73,26 +75,30 @@ if NPROC <= 0:
     exit(1)
 
 
-CWD = dir_path = os.path.dirname(os.path.realpath(__file__))
+CWD = Path(__file__).parent
 os.chdir(CWD)
 
-OUTPUT_PARENT ='/tmp/scoreboard-analyser-output'
+OUTPUT_PARENT = Path(tempfile.gettempdir()) / 'scoreboard-analyser-output'
 if args.debug_dir is not None:
-    OUTPUT_PARENT = args.debug_dir
+    OUTPUT_PARENT = Path(args.debug_dir)
 
-if not os.path.isdir(OUTPUT_PARENT):
-    os.mkdir(OUTPUT_PARENT)
+if not OUTPUT_PARENT.is_dir() and OUTPUT_PARENT.exists():
+    print_log(f'{OUTPUT_PARENT} is not a directory!')
+    exit(2)
+
+if not OUTPUT_PARENT.exists():
+    OUTPUT_PARENT.mkdir()
 
 scoreboards = []
 for scoreboard in args.scoreboard:
-    real_path = os.path.realpath(scoreboard)
-    if os.path.exists(real_path):
+    real_path = Path(scoreboard).absolute()
+    if real_path.exists():
         scoreboards.append(real_path)
     else:
         print_log(f'No such file: {real_path}')
 
 if scoreboards == [] and not args.batch:
-    exit(2)
+    exit(3)
 
 # END Setup environment
 
@@ -102,8 +108,8 @@ OUT = []
 WORKER_NO = 0
 def process_scoreboard(scoreboard, reader):
     global WORKER_NO
-    debug_output = tempfile.TemporaryDirectory(dir=OUTPUT_PARENT).name
-    os.mkdir(debug_output)
+    debug_output = Path(tempfile.TemporaryDirectory(dir=OUTPUT_PARENT).name)
+    debug_output.mkdir()
 
     worker_no = WORKER_NO
     WORKER_NO += 1
@@ -127,8 +133,8 @@ with mp.Pool(NPROC) as pool:
     if args.batch:
         while scoreboard := sys.stdin.readline():
             scoreboard = scoreboard[:-1]
-            real_path = os.path.realpath(scoreboard)
-            if os.path.exists(real_path):
+            real_path = Path(scoreboard).absolute()
+            if real_path.exists():
                 process_scoreboard(real_path, reader)
             else:
                 print_log(f'No such file: {scoreboard}')
