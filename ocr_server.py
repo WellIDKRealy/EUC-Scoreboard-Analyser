@@ -16,6 +16,10 @@ parser.add_argument('-p', '--port',
                     default=2137,
                     type=int,
                     help='server port')
+parser.add_argument('-n', '--nproc',
+                    default=cpu_count(),
+                    type=int,
+                    help='number of processes')
 parser.add_argument('-k', '--authkey',
                     default='123',
                     help='authentication key')
@@ -66,7 +70,7 @@ if __name__ == '__main__':
 
     dispatcher_p = Process(target=dispatcher, args=(queue, ADDRESS, AUTHKEY))
     queue_proceses = [Process(target=queue_process, args=(queue, i, ))
-                      for i in range(cpu_count())]
+                      for i in range(args.nproc)]
 
     dispatcher_p.start()
     for p in queue_proceses:
