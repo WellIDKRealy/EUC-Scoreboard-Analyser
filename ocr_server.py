@@ -60,7 +60,7 @@ def queue_process(queue, index):
             print_exception(e)
 
 
-if __name__ == '__maim__':
+if __name__ == '__main__':
     freeze_support()
     queue = Queue()
 
