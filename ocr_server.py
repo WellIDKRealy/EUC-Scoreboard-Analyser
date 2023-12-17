@@ -64,7 +64,7 @@ def queue_process(index):
             print_exception(e)
 
 
-if __name__ = '__maim__':
+if __name__ == '__maim__':
     freeze_support()
     dispatcher_p = Process(target=dispatcher, args=(ADDRESS, AUTHKEY))
     queue_proceses = [Process(target=queue_process, args=(i, ))
