@@ -103,44 +103,44 @@ if scoreboards == [] and not args.batch:
 # END Setup environment
 
 # MAIN
+if __name__ == '__main__':
+    OUT = []
+    WORKER_NO = 0
+    def process_scoreboard(scoreboard, reader):
+        global WORKER_NO
+        debug_output = Path(tempfile.TemporaryDirectory(dir=OUTPUT_PARENT).name)
+        debug_output.mkdir()
 
-OUT = []
-WORKER_NO = 0
-def process_scoreboard(scoreboard, reader):
-    global WORKER_NO
-    debug_output = Path(tempfile.TemporaryDirectory(dir=OUTPUT_PARENT).name)
-    debug_output.mkdir()
+        worker_no = WORKER_NO
+        WORKER_NO += 1
 
-    worker_no = WORKER_NO
-    WORKER_NO += 1
+        io = main.IO_DATA(LOG,
+                          DEBUG,
+                          debug_output,
+                          worker_no)
 
-    io = main.IO_DATA(LOG,
-                      DEBUG,
-                      debug_output,
-                      worker_no)
+        pool.apply_async(main.process_image,
+                         (scoreboard, reader, io),
+                         callback=lambda res: OUT.append(res),
+                         error_callback=lambda e: traceback.print_exception(e))
 
-    pool.apply_async(main.process_image,
-                     (scoreboard, reader, io),
-                     callback=lambda res: OUT.append(res),
-                     error_callback=lambda e: traceback.print_exception(e))
+    reader = None if args.ocr_server is None else remote_reader.Reader(args.ocr_server, args.ocr_port, args.ocr_authkey)
 
-reader = None if args.ocr_server is None else remote_reader.Reader(args.ocr_server, args.ocr_port, args.ocr_authkey)
+    with mp.Pool(NPROC) as pool:
+        for scoreboard in scoreboards:
+            process_scoreboard(scoreboard, reader)
 
-with mp.Pool(NPROC) as pool:
-    for scoreboard in scoreboards:
-        process_scoreboard(scoreboard, reader)
+        if args.batch:
+            while scoreboard := sys.stdin.readline():
+                scoreboard = scoreboard[:-1]
+                real_path = Path(scoreboard).absolute()
+                if real_path.exists():
+                    process_scoreboard(real_path, reader)
+                else:
+                    print_log(f'No such file: {scoreboard}')
 
-    if args.batch:
-        while scoreboard := sys.stdin.readline():
-            scoreboard = scoreboard[:-1]
-            real_path = Path(scoreboard).absolute()
-            if real_path.exists():
-                process_scoreboard(real_path, reader)
-            else:
-                print_log(f'No such file: {scoreboard}')
+        pool.close()
+        pool.join()
 
-    pool.close()
-    pool.join()
-
-print(json.dumps(OUT))
+    print(json.dumps(OUT))
 # END MAIN

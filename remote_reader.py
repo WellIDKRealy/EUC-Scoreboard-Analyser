@@ -1,11 +1,5 @@
 from multiprocessing.connection import Client
 
-class ReaderData:
-    def __init__(self, img, args, kwargs):
-        self.img = img
-        self.args = args
-        self.kwargs = kwargs
-
 class Reader:
     def __init__(self, address, port, authkey):
         self.address = (address, port)
